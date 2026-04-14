@@ -1,0 +1,18 @@
+# Build
+cpp/build/
+*.so
+*.egg-info/
+dist/
+build/
+
+# Python
+__pycache__/
+*.pyc
+
+# Data
+data/
+*.tar.gz
+
+# IDE
+.vscode/
+.idea/

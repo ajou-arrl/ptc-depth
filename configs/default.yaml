@@ -1,0 +1,22 @@
+# PTC-Depth pipeline configuration
+
+# --- Scene ---
+max_depth: 80.0
+min_baseline: 0.05
+outdoor: true
+
+# --- Output ---
+verbose: false
+
+# --- Iterative refinement ---
+iterative: 0
+
+# --- Tunable ---
+ransac_max_iters: 50
+min_flow_px: 0.1
+margin_x_pct: 0.05
+margin_y_pct: 0.05
+max_points: 500
+lambda_forget: 0.1
+kappa_min: 0.25
+tau0_deg: 1.0

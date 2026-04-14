@@ -1,0 +1,25 @@
+[build-system]
+requires = ["scikit-build-core>=0.5", "pybind11>=2.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "ptc-depth"
+version = "1.0.0"
+description = "PTC-Depth: Pose-Refined Monocular Depth Estimation with Temporal Consistency"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "opencv-python>=4.5",
+]
+
+[project.optional-dependencies]
+demo = [
+    "matplotlib",
+    "rerun-sdk>=0.20",
+    "torch",
+]
+
+[tool.scikit-build]
+cmake.source-dir = "cpp"
+cmake.build-type = "Release"
+wheel.packages = ["ptc_depth"]
