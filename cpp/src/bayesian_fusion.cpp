@@ -1,5 +1,5 @@
 /**
- * Bayesian scale fusion implementation (Paper §3.4, Eq. 7-11)
+ * Bayesian scale fusion implementation
  */
 #include "ptc_depth/bayesian_fusion.hpp"
 #include "ptc_depth/config.hpp"
@@ -35,7 +35,7 @@ BayesianFusion::Result BayesianFusion::first_frame(
 
     cv::Mat V_obs;
     if (rho.empty() || Z_tri.empty() || rho.rows != H || rho.cols != W) {
-        V_obs = cv::Mat(H, W, CV_32F, cv::Scalar(100.0f));
+        V_obs = cv::Mat(H, W, CV_32F, cv::Scalar(config.max_var));
     } else {
         V_obs = rho_to_variance(
             rho, cam_, baseline, b_ref, config
@@ -65,6 +65,9 @@ BayesianFusion::Result BayesianFusion::fuse(
         rho, cam_, baseline, b_ref, config
     );
 
+    // Save original V_prior before inflation (for rejection path)
+    cv::Mat V_prior_orig = V_prior.clone();
+
     // --- Adaptive variance inflation ---
     inflate_V_prior(V_prior, rho, config.tau0_deg, baseline, b_ref);
 
@@ -86,8 +89,7 @@ BayesianFusion::Result BayesianFusion::fuse(
 
     if (out.frame_rejected) {
         Z_prior.copyTo(out.z_refined);
-        V_prior.copyTo(out.V_post);
-        out.V_post *= 1.5f;
+        V_prior_orig.copyTo(out.V_post);  // use pre-inflation variance
     }
 
     return out;
@@ -231,7 +233,7 @@ BayesianFusion::Result BayesianFusion::kalman_update(
                 if (std::isfinite(zt) && zt > 1e-8f) S_obs   = zt * inv_depth;
             }
 
-            // Consistency score: c(x) ≈ exp(-x²/2) (Eq. 21)
+            // Consistency score: c(x) ≈ exp(-x²/2)
             // Padé approx: 1/(1 + x²/2 + x⁴/8 + x⁶/48)
             float consistency = 0.0f;
             if (S_prior > 0 && S_obs > 1e-8f) {
@@ -253,10 +255,10 @@ BayesianFusion::Result BayesianFusion::kalman_update(
             if (!sp_valid && !so_valid) {
                 // Case 1: no valid data
                 zr_row[c] = std::numeric_limits<float>::quiet_NaN();
-                vp_out[c] = 100.0f;
+                vp_out[c] = config.max_var;
             } else if (!sp_valid) {
                 // Case 2: observation only
-                vp_out[c] = vo_valid ? vo : 100.0f;
+                vp_out[c] = vo_valid ? vo : config.max_var;
                 zr_row[c] = id_valid ? (S_obs / inv_depth) : std::numeric_limits<float>::quiet_NaN();
             } else if (!so_valid) {
                 // Case 3: prior only
@@ -270,29 +272,22 @@ BayesianFusion::Result BayesianFusion::kalman_update(
 
                 float innov = S_obs - S_prior;
                 float V_innov = vp_eff + vo_eff;
-                float gamma = (innov * innov) / V_innov;  // Eq. 8
-
-                float chi2_hard_eff = config.chi2_hard *
-                    (1.0f + 0.7f * config.gate_loosen * (1.0f - consistency));
+                float gamma = (innov * innov) / V_innov;
 
                 if (config.frame_reject_enable) {
                     n_valid++;
-                    if (gamma > chi2_hard_eff) n_bad++;
+                    if (gamma > config.chi2_hard) n_bad++;
                 }
 
                 // κ = min(κ_raw, κ_min + (1-κ_min)·c)
                 float kappa_cap = config.kappa_min + (1.0f - config.kappa_min) * consistency;
-                float kappa_raw = vp_eff / V_innov;   // Eq. 9
+                float kappa_raw = vp_eff / V_innov;
                 float kappa = std::min(kappa_raw, kappa_cap);
 
                 float S_post_val, v_post_val;
-                if (gamma > chi2_hard_eff) {
-                    // Hard rejection: keep lower-variance estimate
-                    if (vp_eff < vo_eff) {
-                        S_post_val = S_prior; v_post_val = vp_eff;
-                    } else {
-                        S_post_val = S_obs; v_post_val = vo_eff;
-                    }
+                if (gamma > config.chi2_hard) {
+                    // Hard rejection: always keep prior
+                    S_post_val = S_prior; v_post_val = vp_eff;
                 } else {
                     // S_post = S_prior + κ·(S_obs - S_prior)
                     S_post_val = S_prior + kappa * innov;

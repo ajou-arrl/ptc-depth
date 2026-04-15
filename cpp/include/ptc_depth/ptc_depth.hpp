@@ -113,7 +113,7 @@ private:
     // RANSAC affine outlier filter on z_obs
     void filter_outliers(cv::Mat& z_obs, const cv::Mat& d_rel, int H, int W);
 
-    // Apply metric scale estimation (Eq. 12)
+    // Apply metric scale estimation
     void apply_metric_scale(cv::Mat& z_refined, cv::Mat& V_post,
                             const cv::Mat& d_rel, const cv::Mat& seg_labels, int H, int W);
 

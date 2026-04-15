@@ -1,4 +1,4 @@
-// Bayesian scale fusion (Paper §3.4, Eq. 7-11)
+// Bayesian scale fusion
 #pragma once
 
 #include <opencv2/core.hpp>

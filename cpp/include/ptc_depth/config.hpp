@@ -15,8 +15,7 @@ struct FusionConfig {
 
     // --- Bayesian fusion ---
     float chi2_hard = 10.828f;       // chi2 quantile at 99% (hard gate) for 1 DOF
-    float kappa_min = 0.35f;         // Paper: κ_min — lower bound on Kalman gain (Eq. 10)
-    float gate_loosen = 0.9f;        // Gate loosening for low consistency
+    float kappa_min = 0.35f;         // κ_min — lower bound on Kalman gain
     float lambda_forget = 0.4f;      // Process noise factor
 
     // --- Consistency tolerance (paper: σ_e) ---
@@ -27,7 +26,7 @@ struct FusionConfig {
     // --- Frame rejection ---
     bool frame_reject_enable = true;
     int frame_reject_min_valid = 1000;
-    float frame_reject_bad_frac = 0.5f;
+    float frame_reject_bad_frac = 0.3f;
 };
 
 // Motion field estimation (RANSAC + IRLS)
@@ -70,6 +69,7 @@ struct MotionFieldConfig {
 struct MetricScaleConfig {
     float min_pts_ratio = 0.001f;
     float global_trim_k = 4.5f;
+    float max_var = 100.0f;
 };
 
 // Main pipeline configuration
@@ -117,6 +117,7 @@ struct PTCDepthConfig {
         fusion.lambda_forget = lambda_forget;
         fusion.kappa_min = kappa_min;
         fusion.tau0_deg = tau0_deg;
+        metric.max_var = fusion.max_var;
     }
 
     PTCDepthConfig() { sync(); }

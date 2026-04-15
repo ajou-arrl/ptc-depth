@@ -1,4 +1,4 @@
-// Motion field estimation (Eq. 1-2): ṗ = B·Ω + (d_rel)·A·T
+// Motion field estimation: ṗ = B·Ω + (d_rel)·A·T
 #pragma once
 
 #include <Eigen/Dense>
@@ -33,7 +33,7 @@ struct MotionFieldResult {
 inline void compute_motion_matrices(double nx, double ny,
                                     Eigen::Matrix<double, 2, 3>& B,
                                     Eigen::Matrix<double, 2, 3>& A) {
-    // B matrix (rotation term, Eq. 1)
+    // B matrix (rotation term)
     B(0, 0) = nx * ny;
     B(0, 1) = -(1.0 + nx * nx);
     B(0, 2) = ny;
@@ -42,7 +42,7 @@ inline void compute_motion_matrices(double nx, double ny,
     B(1, 1) = -(nx * ny);
     B(1, 2) = -nx;
 
-    // A matrix (translation term, Eq. 1)
+    // A matrix (translation term)
     A(0, 0) = -1.0;
     A(0, 1) =  0.0;
     A(0, 2) =  nx;

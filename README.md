@@ -9,6 +9,7 @@ PTC-Depth produces **temporally consistent metric depth from monocular image seq
 ![PTC-Depth Overview](assets/main_fig.jpg)
 
 ## News
+- **2026-04**: Roadside thermal and forest sample data added
 - **2026-04**: Code and sample data released
 
 ## Installation
@@ -89,13 +90,13 @@ result = pipeline(image, inv_depth, baseline,
 
 ## Sample Data
 
-We provide a 500-frame subset of our self-collected Wheel Roadside dataset for demo purposes. The dataset includes RGB images, pre-computed inverse depth maps, and per-frame baselines derived from wheel odometry.
-
-Download the sample data and run the [Rerun](https://rerun.io/)-based visualization:
+We provide 500-frame subsets from our self-collected Wheel dataset (roadside RGB, roadside thermal, forest RGB) for demo purposes. Each dataset includes images, pre-computed inverse depth maps, GT LiDAR depth, and per-frame baselines derived from wheel odometry.
 
 ```bash
 python examples/download_sample.py
-python examples/visualize_sample.py
+python examples/visualize_sample.py --dataset roadside
+python examples/visualize_sample.py --dataset roadside_thr
+python examples/visualize_sample.py --dataset forest
 ```
 
 ![Rerun visualization example](assets/rerun_example.png)

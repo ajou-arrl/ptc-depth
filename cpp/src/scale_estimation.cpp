@@ -1,5 +1,5 @@
 /**
- * Scale estimation: variance mapping, scale matching, per-segment metric depth (Eq. 12)
+ * Scale estimation: variance mapping, scale matching, per-segment metric depth
  */
 #include "ptc_depth/scale_estimation.hpp"
 #include "ptc_depth/utils.hpp"
@@ -258,6 +258,20 @@ static MetricScaleResult solve_metric_core(
         }
     }
 
+    // Build inlier lookup for per-label filtering
+    std::vector<uint8_t> is_global_inlier(total, 0);
+    if (!scale_pixel_idx.empty()) {
+        for (int idx : scale_pixel_idx)
+            is_global_inlier[idx] = 1;
+    } else {
+        // No RANSAC: treat all valid pixels as inlier
+        for (int i = 0; i < total; ++i) {
+            if (std::isfinite(rd[i]) && std::isfinite(zo[i]) && rd[i] > 0 && zo[i] > 0 &&
+                (!has_mask || mk[i] != 0))
+                is_global_inlier[i] = 1;
+        }
+    }
+
     // === Per-label or global application ===
     float* z_out = result.z_out.ptr<float>(0);
     float* v_out = result.V_out.ptr<float>(0);
@@ -270,13 +284,14 @@ static MetricScaleResult solve_metric_core(
             const int* begin = label_index.begin(L);
             const int* end = label_index.end(L);
 
-            // Collect ratios and pixel indices for this label
+            // Collect ratios only from global RANSAC inlier pixels
             std::vector<double> lr;
-            std::vector<int> lr_idx;  // pixel indices corresponding to lr
+            std::vector<int> lr_idx;
             lr.reserve(n_px);
             lr_idx.reserve(n_px);
             for (const int* p = begin; p != end; ++p) {
                 int idx = *p;
+                if (!is_global_inlier[idx]) continue;
                 if (std::isfinite(rd[idx]) && std::isfinite(zo[idx]) && rd[idx] > 0 && zo[idx] > 0 &&
                     (!has_mask || mk[idx] != 0)) {
                     lr.push_back(static_cast<double>(zo[idx]) / static_cast<double>(rd[idx]));
@@ -323,10 +338,11 @@ static MetricScaleResult solve_metric_core(
                 }
             }
 
-            // Apply
+            // Apply (clamp variance to max_var)
+            float v_clamped = std::min(v_label, config.max_var);
             for (const int* p = begin; p != end; ++p) {
                 z_out[*p] = s_label * rd[*p];
-                v_out[*p] = v_label;
+                v_out[*p] = v_clamped;
             }
         }
     } else {

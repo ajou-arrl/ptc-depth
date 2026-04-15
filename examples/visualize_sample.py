@@ -1,9 +1,11 @@
 """PTC-Depth Rerun visualizer.
 
 Usage:
-    python examples/visualize_sample.py
-    python examples/visualize_sample.py --data-path /path/to/data
-    python examples/visualize_sample.py --segmentation
+    python examples/visualize_sample.py --dataset roadside
+    python examples/visualize_sample.py --dataset roadside_thr
+    python examples/visualize_sample.py --dataset forest
+    python examples/visualize_sample.py --dataset roadside --segmentation
+    python examples/visualize_sample.py --data-path /path/to/custom/data
 """
 
 import sys
@@ -28,7 +30,6 @@ def compute_metrics(z, gt, max_depth=80.0):
     ratio = np.maximum(z[m] / gt[m], gt[m] / z[m])
     return {
         'd125': (ratio < 1.25).mean() * 100,
-        'absrel': (np.abs(z[m] - gt[m]) / gt[m]).mean(),
     }
 
 
@@ -45,7 +46,7 @@ def depth_to_colormap(d, vmin=0, vmax=80):
 
 
 def error_to_colormap(z, gt, max_depth=80.0):
-    import matplotlib.cm as mcm
+    import matplotlib.pyplot as plt
     H, W = gt.shape[:2]
     err_img = np.zeros((H, W, 3), dtype=np.uint8)
     if z is None or np.size(z) == 0:
@@ -53,9 +54,10 @@ def error_to_colormap(z, gt, max_depth=80.0):
     m = (z > 0) & (z < max_depth) & (gt > 0) & (gt < max_depth) & np.isfinite(z) & np.isfinite(gt)
     if m.sum() < 10:
         return err_img
-    signed_err = np.where(gt > 0, (z - gt) / gt, 0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        signed_err = np.where(gt > 0, (z - gt) / gt, 0)
     norm = np.clip(signed_err / 0.5 * 0.5 + 0.5, 0, 1)
-    cmap = mcm.get_cmap('RdBu_r')
+    cmap = plt.colormaps['RdBu_r']
     rgba = cmap(norm[m])
     err_img[m, 0] = (rgba[:, 0] * 255).astype(np.uint8)
     err_img[m, 1] = (rgba[:, 1] * 255).astype(np.uint8)
@@ -98,15 +100,29 @@ def depth_to_pointcloud(depth, image, fx, fy, cx, cy, max_depth=80.0, grad_thres
     return points, colors
 
 
+DATASET_MAP = {
+    'roadside':     'wheel_roadside_rgb',
+    'roadside_thr': 'wheel_roadside_thr',
+    'forest':       'wheel_forest_rgb',
+}
+
+
 def main():
     parser = argparse.ArgumentParser(description='PTC-Depth Rerun visualizer')
-    parser.add_argument('--data-path', type=str,
-                        default=str(PROJECT_ROOT / 'data' / 'wheel_roadside_sample'))
+    parser.add_argument('--dataset', type=str, default='roadside',
+                        choices=DATASET_MAP.keys(),
+                        help='Sample dataset name (roadside, roadside_thr, forest)')
+    parser.add_argument('--data-path', type=str, default=None,
+                        help='Custom data path (overrides --dataset)')
     parser.add_argument('--segmentation', action='store_true',
                         help='Enable edge-aware segmentation for per-segment scale')
     args = parser.parse_args()
 
-    data_path = Path(args.data_path)
+    if args.data_path:
+        data_path = Path(args.data_path)
+    else:
+        data_path = PROJECT_ROOT / 'data' / DATASET_MAP[args.dataset]
+
     if not data_path.exists():
         print(f"Data not found: {data_path}")
         print("Run: python examples/download_sample.py")
@@ -126,7 +142,20 @@ def main():
     gt_dir = data_path / 'depth_gt'
     has_gt = gt_dir.exists()
 
-    start = 1
+    start = 0
+
+    # Detect LiDAR valid row range from first GT frame for cropping
+    crop_r0, crop_r1 = 0, H
+    if has_gt:
+        for gi in range(n_frames):
+            gf = gt_dir / f'{gi:06d}.npy'
+            if gf.exists():
+                gt_sample = np.load(str(gf))
+                valid_rows = np.where((gt_sample > 0).any(axis=1))[0]
+                if len(valid_rows) > 10:
+                    crop_r0 = max(0, int(valid_rows[0]) - 5)
+                    crop_r1 = min(H, int(valid_rows[-1]) + 5)
+                    break
 
     # Blueprint
     blueprint = rrb.Blueprint(
@@ -224,22 +253,23 @@ def main():
         z_fused = result.get('z_fused')
         z_refined = result.get('depth')
 
-        # Depth maps
+        # Depth maps (cropped to LiDAR valid region)
+        r0, r1 = crop_r0, crop_r1
         if z_obs is not None and np.size(z_obs) > 0:
-            rr.log("depth/z_obs", rr.Image(depth_to_colormap(z_obs, vmin, vmax)))
+            rr.log("depth/z_obs", rr.Image(depth_to_colormap(z_obs, vmin, vmax)[r0:r1]))
         if z_fused is not None and np.size(z_fused) > 0:
-            rr.log("depth/z_fused", rr.Image(depth_to_colormap(z_fused, vmin, vmax)))
+            rr.log("depth/z_fused", rr.Image(depth_to_colormap(z_fused, vmin, vmax)[r0:r1]))
         if z_refined is not None and np.size(z_refined) > 0:
-            rr.log("depth/z_refined", rr.Image(depth_to_colormap(z_refined, vmin, vmax)))
+            rr.log("depth/z_refined", rr.Image(depth_to_colormap(z_refined, vmin, vmax)[r0:r1]))
 
-        # Error maps (only if GT available)
+        # Error maps (cropped, only if GT available)
         if gt is not None:
             if z_obs is not None and np.size(z_obs) > 0:
-                rr.log("error/z_obs", rr.Image(error_to_colormap(z_obs, gt)))
+                rr.log("error/z_obs", rr.Image(error_to_colormap(z_obs, gt)[r0:r1]))
             if z_fused is not None and np.size(z_fused) > 0:
-                rr.log("error/z_fused", rr.Image(error_to_colormap(z_fused, gt)))
+                rr.log("error/z_fused", rr.Image(error_to_colormap(z_fused, gt)[r0:r1]))
             if z_refined is not None and np.size(z_refined) > 0:
-                rr.log("error/z_refined", rr.Image(error_to_colormap(z_refined, gt)))
+                rr.log("error/z_refined", rr.Image(error_to_colormap(z_refined, gt)[r0:r1]))
 
             # d<1.25
             for key, arr in [('tri', z_obs), ('refined', z_refined)]:
@@ -281,7 +311,7 @@ def main():
                     pts_gt, colors=gt_colors, radii=rr.Radius.ui_points(1.0)))
 
         if i % 50 == 0 or i == n_frames - 1:
-            print(f"[{i:4d}/{n_frames-1}]")
+            print(f"[{i+1:4d}/{n_frames}]")
 
     print("Done.")
 

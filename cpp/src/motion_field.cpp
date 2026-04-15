@@ -92,7 +92,7 @@ void eval_hypothesis(
     }
 }
 
-// Fill linear system rows: predicted_flow = B·ω + d_rel·A·t (Eq. 1)
+// Fill linear system rows: predicted_flow = B·ω + d_rel·A·t
 void fill_system_row(
     const Eigen::Matrix<double, 2, 3>& B,
     const Eigen::Matrix<double, 2, 3>& A,
@@ -181,7 +181,7 @@ ScoringResult score_hypothesis(
     for (int i = 0; i < n; ++i) {
         bool is_inlier = (rel_residuals[i] <= thresh);
 
-        // Direction check (Supp. §2.3)
+        // Direction check
         if (is_inlier) {
             double pred_mag = pred_px[i].norm() + kEpsDenom;
             double obs_mag = obs_px[i].norm() + kEpsDenom;
@@ -765,11 +765,11 @@ void MotionFieldEstimator::residual_at(int i, const CollectedPoints& pts,
     double t0 = t_cam(0), t1 = t_cam(1), t2 = t_cam(2);
     double omega0 = omega(0), omega1 = omega(1), omega2 = omega(2);
 
-    // A(nx,ny) · t  (Eq. 1: translation Jacobian)
+    // A(nx,ny) · t  (translation Jacobian)
     double A_t_0 = -t0 + nx * t2;
     double A_t_1 = -t1 + ny * t2;
 
-    // B(nx,ny) · ω + d_rel · A · t  (Eq. 1: motion field prediction)
+    // B(nx,ny) · ω + d_rel · A · t  (motion field prediction)
     double pred_n0 = nxy * omega0 - (1.0 + nx2) * omega1 + ny * omega2 + d_rel * A_t_0;
     double pred_n1 = (1.0 + ny2) * omega0 - nxy * omega1 - nx * omega2 + d_rel * A_t_1;
 
@@ -866,24 +866,44 @@ MotionFieldResult MotionFieldEstimator::classify_inliers(
         }
     }
 
-    // Pass 2: collect inlier matches and build mask (serial)
-    result.matches.u0.reserve(num_inliers);
-    result.matches.v0.reserve(num_inliers);
-    result.matches.u1.reserve(num_inliers);
-    result.matches.v1.reserve(num_inliers);
+    // Pass 2: inliers use actual flow, non-inliers use motion field predicted flow
+    result.matches.u0.reserve(n_all);
+    result.matches.v0.reserve(n_all);
+    result.matches.u1.reserve(n_all);
+    result.matches.v1.reserve(n_all);
 
     for (int i = 0; i < n_all; ++i) {
+        float u0 = pts.all_matches.u0[i];
+        float v0 = pts.all_matches.v0[i];
+
         if (is_inlier[i]) {
-            result.matches.u0.push_back(pts.all_matches.u0[i]);
-            result.matches.v0.push_back(pts.all_matches.v0[i]);
+            result.matches.u0.push_back(u0);
+            result.matches.v0.push_back(v0);
             result.matches.u1.push_back(pts.all_matches.u1[i]);
             result.matches.v1.push_back(pts.all_matches.v1[i]);
 
-            int px = static_cast<int>(pts.all_matches.u0[i]);
-            int py = static_cast<int>(pts.all_matches.v0[i]);
+            int px = static_cast<int>(u0);
+            int py = static_cast<int>(v0);
             if (px >= 0 && px < W && py >= 0 && py < H) {
                 result.inlier_mask.at<uint8_t>(py, px) = 1;
             }
+        } else {
+            double nx = pts.all_coords_normalized[i](0);
+            double ny = pts.all_coords_normalized[i](1);
+            double d_rel = pts.all_d_rels[i];
+            double nx2 = nx * nx, ny2 = ny * ny, nxy = nx * ny;
+
+            double t0 = t_cam(0), t1 = t_cam(1), t2 = t_cam(2);
+            double pred_n0 = nxy*omega(0) - (1.0+nx2)*omega(1) + ny*omega(2) + d_rel*(-t0 + nx*t2);
+            double pred_n1 = (1.0+ny2)*omega(0) - nxy*omega(1) - nx*omega(2) + d_rel*(-t1 + ny*t2);
+
+            float pred_u1 = u0 + static_cast<float>(pred_n0 * fx_);
+            float pred_v1 = v0 + static_cast<float>(pred_n1 * fy_);
+
+            result.matches.u0.push_back(u0);
+            result.matches.v0.push_back(v0);
+            result.matches.u1.push_back(pred_u1);
+            result.matches.v1.push_back(pred_v1);
         }
     }
 

@@ -96,42 +96,45 @@ void PTCDepth::update_state(
 
 // Helper: RANSAC affine outlier filter on z_obs
 void PTCDepth::filter_outliers(cv::Mat& z_obs, const cv::Mat& d_rel, int H, int W) {
-    // Collect samples: x = inv_depth, y = 1/z_obs
-    std::vector<float> fit_x, fit_y;
-    std::vector<int> fit_idx;
-    fit_x.reserve(H * W / 4);
-    fit_y.reserve(H * W / 4);
-    fit_idx.reserve(H * W / 4);
-
     const float* zo_data = z_obs.ptr<float>(0);
     const float* lam_data = d_rel.ptr<float>(0);
     int total = H * W;
 
-    for (int i = 0; i < total; i += 2) {
+    // Collect ALL valid samples for RANSAC fit
+    std::vector<float> fit_x, fit_y;
+    fit_x.reserve(total / 2);
+    fit_y.reserve(total / 2);
+
+    for (int i = 0; i < total; ++i) {
         float zo = zo_data[i];
         float lam = lam_data[i];
         if (std::isfinite(zo) && zo > 0.1f && zo < config_.max_depth &&
             std::isfinite(lam) && lam > 1e-6f) {
             fit_x.push_back(lam);
             fit_y.push_back(1.0f / zo);
-            fit_idx.push_back(i);
         }
     }
 
     if (fit_x.size() <= 50) return;
 
-    auto result = ransac_affine_fit(fit_x, fit_y);
+    constexpr float rel_thr = 0.2f;
+    auto result = ransac_affine_fit(fit_x, fit_y, 100, rel_thr);
+    float a = static_cast<float>(result.a);
+    float b = static_cast<float>(result.b);
 
-    // NaN-out outliers
-    int n_removed = 0;
+    // Apply filter to ALL pixels using the fitted model
     float* zo_mut = z_obs.ptr<float>(0);
-    for (size_t j = 0; j < fit_idx.size(); ++j) {
-        if (!result.inlier_mask[j]) {
-            zo_mut[fit_idx[j]] = std::numeric_limits<float>::quiet_NaN();
-            n_removed++;
+    for (int i = 0; i < total; ++i) {
+        float zo = zo_mut[i];
+        float lam = lam_data[i];
+        if (!std::isfinite(zo) || zo <= 0.1f || !std::isfinite(lam) || lam <= 1e-6f) continue;
+
+        float pred = a * lam + b;
+        float actual = 1.0f / zo;
+        if (pred <= 1e-6f || std::abs(pred - actual) >= rel_thr * actual) {
+            zo_mut[i] = std::numeric_limits<float>::quiet_NaN();
         }
     }
-
 }
 
 // Helper: apply metric scale estimation
@@ -372,7 +375,7 @@ ScaleFusionResult PTCDepth::refine(
     const FusionConfig& fuse_cfg = config_.fusion;
 
     // Declare fusion state variables outside loop (visible after loop ends)
-    cv::Mat V_post = cv::Mat(H, W, CV_32F, cv::Scalar(100.0f));
+    cv::Mat V_post = cv::Mat(H, W, CV_32F, cv::Scalar(fuse_cfg.max_var));
     cv::Mat z_fused;  // Sparse fusion result (before solve_metric_from_rel)
 
     bool has_prev_depth = !prev_depth_.empty();
@@ -436,9 +439,7 @@ ScaleFusionResult PTCDepth::refine(
         auto& pose = *pose_opt;
         result.pose = pose.pose;
 
-
-        // Now call compute_tri_and_warp for BOTH GT and normal paths
-        // (GT path previously triangulated inline, now unified)
+        // Triangulate with dense matches (inlier=actual flow, non-inlier=model predicted)
         TriResult tri_result;
         cv::Mat z_prior_pose, V_warp_pose;
         auto tw = compute_tri_and_warp(
@@ -451,19 +452,20 @@ ScaleFusionResult PTCDepth::refine(
         z_prior_pose = std::move(tw.z_prior_pose);
         V_warp_pose = std::move(tw.V_warp_pose);
 
-        result.z_obs = tri_result.z_obs;
+        result.z_obs = tri_result.z_obs.clone();  // raw for verbose output
 
-        filter_outliers(result.z_obs, d_rel_f, H, W);
+        filter_outliers(tri_result.z_obs, d_rel_f, H, W);
+        cv::Mat z_obs_filtered = tri_result.z_obs;  // filtered for fusion
 
         // ========== [3] Bayesian Scale Fusion ==========
-        V_post.setTo(100.0f);
+        V_post.setTo(fuse_cfg.max_var);
 
         if (!has_prev_depth) {
             // First frame with triangulation: pass through observation
             auto fuse_out = fusion_.first_frame(
-                result.z_obs, tri_result.rho, baseline, baseline_state_.b_ref(), fuse_cfg, H, W
+                z_obs_filtered, tri_result.rho, baseline, baseline_state_.b_ref(), fuse_cfg, H, W
             );
-            result.z_obs.copyTo(result.z_refined);
+            z_obs_filtered.copyTo(result.z_refined);
             V_post = fuse_out.V_post;
         } else {
             // Select warp prior: pose warp vs flow warp
@@ -471,10 +473,10 @@ ScaleFusionResult PTCDepth::refine(
             cv::Mat z_selected_prior = prior.z_prior;
             V_prior = prior.V_prior;
 
-            // Fuse prior + observation via BayesianFusion 
+            // Fuse prior + observation via BayesianFusion
             auto fuse_out = fusion_.fuse(
                 z_selected_prior, V_prior,
-                result.z_obs, tri_result.rho, d_rel_f,
+                z_obs_filtered, tri_result.rho, d_rel_f,
                 baseline, baseline_state_.b_ref(), fuse_cfg
             );
             result.z_refined = fuse_out.z_refined;
@@ -482,9 +484,10 @@ ScaleFusionResult PTCDepth::refine(
 
         }
 
-        // Metric scale estimation
+        // Metric scale estimation (first fusion frame: force global scale)
         if (config_.verbose) z_fused = result.z_refined.clone();
-        apply_metric_scale(result.z_refined, V_post, rel_depth, sky_mask, label_index, H, W);
+        const LabelIndex& metric_labels = has_prev_depth ? label_index : LabelIndex{};
+        apply_metric_scale(result.z_refined, V_post, rel_depth, sky_mask, metric_labels, H, W);
 
         // Save z_fused (verbose only)
         if (config_.verbose && !z_fused.empty()) {

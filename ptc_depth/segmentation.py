@@ -42,18 +42,26 @@ class EdgeAwareSegmentation:
 
     def _build_guide(self, rgb_or_gray, depth, edge_map, sky_mask):
         img = rgb_or_gray
-        if img.ndim == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-        lab = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_BGR2LAB).astype(np.float32)
-        A = (lab[..., 1] - 128.0) / 128.0
-        B = (lab[..., 2] - 128.0) / 128.0
+        is_gray = img.ndim == 2
 
-        chans = [
-            self.wrgb * A,
-            self.wrgb * B,
-            self.wx * depth.astype(np.float32),
-            self.wgrad * (edge_map.astype(np.float32) ** self.grad_power),
-        ]
+        if is_gray:
+            # Grayscale (thermal etc.): use normalized intensity instead of Lab A/B
+            intensity = img.astype(np.float32) / 255.0
+            chans = [
+                self.wrgb * intensity,
+                self.wx * depth.astype(np.float32),
+                self.wgrad * (edge_map.astype(np.float32) ** self.grad_power),
+            ]
+        else:
+            lab = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_BGR2LAB).astype(np.float32)
+            A = (lab[..., 1] - 128.0) / 128.0
+            B = (lab[..., 2] - 128.0) / 128.0
+            chans = [
+                self.wrgb * A,
+                self.wrgb * B,
+                self.wx * depth.astype(np.float32),
+                self.wgrad * (edge_map.astype(np.float32) ** self.grad_power),
+            ]
         guide = np.stack(chans, axis=-1).astype(np.float32)
 
         non_sky = ~sky_mask
