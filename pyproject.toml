@@ -10,9 +10,13 @@ requires-python = ">=3.8"
 dependencies = [
     "numpy",
     "opencv-python>=4.5",
+]
+
+[project.optional-dependencies]
+demo = [
     "matplotlib",
-    "rerun-sdk>=0.20",
-    "torch",
+    "rerun-sdk>=0.24",
+    "pyyaml",
 ]
 
 [tool.scikit-build]

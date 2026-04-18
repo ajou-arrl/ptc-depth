@@ -16,19 +16,58 @@ PTC-Depth produces **temporally consistent metric depth from monocular image seq
 
 > **Note:** The runtimes reported in the paper were measured with optical flow and segmentation running in parallel via C++ multithreading. This release does not include the multithreaded segmentation module due to external dependencies — segmentation is instead provided as a Python example (`ptc_depth.segmentation`).
 
-**Dependencies**
+We recommend installing into an isolated Python 3.8+ environment (venv or conda) to avoid dependency conflicts:
 
-Install the required system libraries:
+```bash
+# venv
+python -m venv .venv && source .venv/bin/activate
+
+# or conda
+conda create -n ptc-depth python=3.10 -y && conda activate ptc-depth
+```
+
+**System dependencies**
 
 ```bash
 sudo apt install libopencv-dev libeigen3-dev cmake
 ```
 
-**Install**
+**Library install (for use in your own code)**
 
 ```bash
 pip install git+https://github.com/ajou-arrl/ptc-depth.git
 ```
+
+**Demo install (to run the `examples/` scripts)**
+
+The demo scripts (`download_sample.py`, `visualize_sample.py`) are not shipped inside the wheel, so you need to clone the repository and install with the `demo` extra:
+
+```bash
+git clone https://github.com/ajou-arrl/ptc-depth.git
+cd ptc-depth
+pip install -e ".[demo]"
+```
+
+The `demo` extra adds `matplotlib`, `rerun-sdk`, and `pyyaml`, which are only used by the example scripts.
+
+## Sample Data
+
+We provide 500-frame subsets from our self-collected Wheel dataset (roadside RGB, roadside thermal, forest RGB) for demo purposes. Each dataset includes images, pre-computed inverse depth maps, GT LiDAR depth, and per-frame baselines derived from wheel odometry.
+
+```bash
+python examples/download_sample.py
+python examples/visualize_sample.py --dataset roadside
+python examples/visualize_sample.py --dataset roadside_thr
+python examples/visualize_sample.py --dataset forest
+```
+
+![Rerun visualization example](assets/rerun_example.png)
+
+The visualization includes:
+
+- **z_obs** (triangulated depth): The raw observation used for fusion. Shows how accurate the per-frame triangulation is before temporal accumulation.
+- **z_refined** (final output): The Bayesian fused result over time. Shows how depth accuracy stabilizes as scale estimates accumulate across frames.
+- **median variance**: Median of Bayesian posterior variance over time. Represents the pipeline's overall confidence in the current depth estimate, combining accumulated prior uncertainty with current observation quality. Note that this reflects geometric confidence, not metric depth accuracy.
 
 ## Usage
 
@@ -87,25 +126,6 @@ result = pipeline(image, inv_depth, baseline,
                   external_t=t,       # (3,) float64
                   flow=optical_flow)  # (H, W, 2) float32, optional
 ```
-
-## Sample Data
-
-We provide 500-frame subsets from our self-collected Wheel dataset (roadside RGB, roadside thermal, forest RGB) for demo purposes. Each dataset includes images, pre-computed inverse depth maps, GT LiDAR depth, and per-frame baselines derived from wheel odometry.
-
-```bash
-python examples/download_sample.py
-python examples/visualize_sample.py --dataset roadside
-python examples/visualize_sample.py --dataset roadside_thr
-python examples/visualize_sample.py --dataset forest
-```
-
-![Rerun visualization example](assets/rerun_example.png)
-
-The visualization includes:
-
-- **z_obs** (triangulated depth): The raw observation used for fusion. Shows how accurate the per-frame triangulation is before temporal accumulation.
-- **z_refined** (final output): The Bayesian fused result over time. Shows how depth accuracy stabilizes as scale estimates accumulate across frames.
-- **median variance**: Median of Bayesian posterior variance over time. Represents the pipeline's overall confidence in the current depth estimate, combining accumulated prior uncertainty with current observation quality. Note that this reflects geometric confidence, not metric depth accuracy.
 
 ## Configuration
 

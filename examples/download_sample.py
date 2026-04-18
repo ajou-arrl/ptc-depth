@@ -4,6 +4,8 @@ import urllib.request
 import tarfile
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).parent.parent
+
 RELEASE_BASE = "https://github.com/ajou-arrl/ptc-depth/releases/download/sample-data"
 
 SAMPLES = {
@@ -42,7 +44,7 @@ def download_one(name, url, data_dir):
 
 
 def main():
-    data_dir = Path.cwd() / "data"
+    data_dir = PROJECT_ROOT / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
     print("Downloading PTC-Depth sample data...")
