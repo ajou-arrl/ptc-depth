@@ -56,6 +56,8 @@ We provide 500-frame subsets from our self-collected Wheel dataset (roadside RGB
 
 ```bash
 python examples/download_sample.py
+```
+```bash
 python examples/visualize_sample.py --dataset roadside
 python examples/visualize_sample.py --dataset roadside_thr
 python examples/visualize_sample.py --dataset forest
